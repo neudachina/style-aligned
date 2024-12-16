@@ -70,6 +70,8 @@ class StyleAlignedArgs:
     svd_variance_key_biggest: bool = False
     svd_variance_key_smallest: bool = False
     svd_variance_key_threshhold: float = None
+    svd_mass_value: bool = False
+    svd_mass_value_threshhold: float = None
     
     svd_reference_value: bool = False
     svd_reference_value_coef: float = 0
@@ -106,6 +108,8 @@ class StyleAlignedArgs:
     query_dropout: bool = False
     key_dropout: bool = False
     value_dropout: bool = False
+    
+    svd_variance_threshold_smallest: float = None
 
 
 
@@ -138,6 +142,97 @@ def adain(feat: T) -> T:
     feat = (feat - feat_mean) / feat_std
     feat = feat * feat_style_std + feat_style_mean
     return feat
+
+
+def svd_cumsum(matrix, threshold, dim=-1, type='variance', biggest=True):
+    u, s, v = torch.linalg.svd(matrix, full_matrices=False)
+    
+    means = s.mean(dim=dim, keepdim=True)
+    if type == 'variance':
+        coefs = (
+            torch.pow(
+                (s - means), 2) / 
+                ((s.shape[dim]-1) * s.var(dim=-1, keepdim=True))
+        )
+    
+    elif type == 'mass':
+        coefs = s / s.sum(dim=dim, keepdim=True)
+        
+    else:
+        raise NotImplementedError('svd type should have "variance" or "mass" value')
+    
+    
+    cumsum = coefs.cumsum(dim=dim) if biggest else 1 - coefs.cumsum(dim=dim)
+    
+    s[cumsum <= threshold] = 0
+    # нахожу индекс первого ненулевого элемента и его cumsum вклада 
+    idx = torch.argmax(s, dim=dim, keepdim=True) if biggest else torch.argmin(s, dim=dim, keepdim=True)
+    bound = torch.gather(cumsum, dim=dim, index=idx)
+    
+    # надо найти prev index, чтобы узнать, как сильно мы обнулили
+    prev_idx = idx.detach().clone()
+    prev_idx[prev_idx != 0] -= 1
+    prev_value = torch.gather(cumsum, dim=dim, index=prev_idx)
+    
+    prev_value[idx == prev_idx] = 0 if biggest else 1
+    
+    if not biggest:
+        torch.utils.swap_tensors(prev_value, bound)
+        
+    # это то, сколько нам не хватило / вклад конкретно нужного элемента в массу
+    k = (threshold - prev_value) / (bound - prev_value) 
+    # => получили долю от чиселки, которую мы хотим обнулить, k < 1
+    
+    if type == 'variance':
+        s.scatter_reduce_(dim, idx, -means, reduce='sum')
+        s.scatter_reduce_(dim, idx, torch.sqrt(k), reduce='prod')
+        s.scatter_reduce_(dim, idx, means, reduce='sum')
+        
+    elif type == 'mass':
+        s.scatter_reduce_(-1, idx, 1 - k, reduce='prod')
+    
+    return u @ torch.diag_embed(s) @ v
+
+
+
+def svd(matrix, start=0, end=None, dim=-1):
+    u, s, v = torch.linalg.svd(matrix, full_matrices=False)
+    
+    end = s.shape[-1] if end is None else end
+    
+    indices = torch.arange(start, end, device=s.device)
+    full_indices = [slice(None)] * s.ndim
+    full_indices[dim] = indices
+    s[full_indices] = 0
+
+    return u @ torch.diag_embed(s) @ v
+
+
+def svd_weights(layer, start=0, end=None):
+    bias = (layer.bias is not None)
+            
+    new_layer = nn.Linear(
+        in_features=layer.in_features, 
+        out_features=layer.out_features, 
+        bias=bias, device=layer.weight.data.device
+    )
+
+    with torch.no_grad():
+        new_layer.weight.data = svd(layer.weight.data, start=start, end=end, dim=-1)
+        if bias:
+            new_layer.bias.data = layer.bias.data.clone()
+        
+        new_layer.eval()
+        
+    return new_layer
+
+def dropout(matrix, coef=2, dim=-2):
+    idx = torch.randperm(matrix.shape[dim])[:matrix.shape[dim] // coef]
+    full_indices = [slice(None)] * matrix.ndim
+    full_indices[dim] = idx
+    
+    matrix[full_indices] = torch.mean(matrix, dim=dim, keepdim=True)
+    return matrix
 
 
 class DefaultAttentionProcessor(nn.Module):
@@ -216,11 +311,12 @@ class SharedAttentionProcessor(DefaultAttentionProcessor):
         else:
             query = attn.to_q(hidden_states)
             if self.query_dropout:
-                replaced = nn.functional.interpolate(
-                    nn.functional.interpolate(query.transpose(-1, -2), scale_factor=0.5, mode='linear'), 
-                    scale_factor=2, mode='linear').transpose(-1, -2)
-                idx = torch.randperm(query.shape[-2])[:query.shape[-2] // 2]
-                query[:, idx, :] = replaced[:, idx, :]
+                # replaced = nn.functional.interpolate(
+                #     nn.functional.interpolate(query.transpose(-1, -2), scale_factor=0.5, mode='linear'), 
+                #     scale_factor=2, mode='linear').transpose(-1, -2)
+                idx = torch.randperm(query.shape[-2])[:query.shape[-2] // 4]
+                # query[:, idx, :] = replaced[:, idx, :]
+                query[:, idx, :] = torch.mean(query, dim=1, keepdim=True)
             
         if self.weights_key_svd:
             bias = (attn.to_k.bias is not None)
@@ -246,11 +342,12 @@ class SharedAttentionProcessor(DefaultAttentionProcessor):
         else:
             key = attn.to_k(hidden_states)
             if self.key_dropout:
-                replaced = nn.functional.interpolate(
-                    nn.functional.interpolate(key.transpose(-1, -2), scale_factor=0.5, mode='linear'), 
-                    scale_factor=2, mode='linear').transpose(-1, -2)
-                idx = torch.randperm(key.shape[-2])[:key.shape[-2] // 2]
-                key[:, idx, :] = replaced[:, idx, :]
+                # replaced = nn.functional.interpolate(
+                #     nn.functional.interpolate(key.transpose(-1, -2), scale_factor=0.5, mode='linear'), 
+                #     scale_factor=2, mode='linear').transpose(-1, -2)
+                idx = torch.randperm(key.shape[-2])[:key.shape[-2] // 4]
+                # key[:, idx, :] = replaced[:, idx, :]
+                key[:, idx, :] = torch.mean(key, dim=1, keepdim=True)
                 
             
         if self.weights_value_svd:
@@ -277,11 +374,12 @@ class SharedAttentionProcessor(DefaultAttentionProcessor):
         else:
             value = attn.to_v(hidden_states)
             if self.value_dropout:
-                replaced = nn.functional.interpolate(
-                    nn.functional.interpolate(value.transpose(-1, -2), scale_factor=0.5, mode='linear'), 
-                    scale_factor=2, mode='linear').transpose(-1, -2)
-                idx = torch.randperm(value.shape[-2])[:value.shape[-2] // 2]
-                value[:, idx, :] = replaced[:, idx, :]
+                # replaced = nn.functional.interpolate(
+                #     nn.functional.interpolate(value.transpose(-1, -2), scale_factor=0.5, mode='linear'), 
+                #     scale_factor=2, mode='linear').transpose(-1, -2)
+                idx = torch.randperm(value.shape[-2])[:value.shape[-2] // 4]
+                # value[:, idx, :] = replaced[:, idx, :]
+                value[:, idx, :] = torch.mean(value, dim=1, keepdim=True)
             
         
         
@@ -335,7 +433,7 @@ class SharedAttentionProcessor(DefaultAttentionProcessor):
         #         u, s, v = torch.linalg.svd(key[batch + 1:, :, ref:, :], full_matrices=False)
         #         s[..., self.svd_reference_key_start:self.svd_reference_key_end] = 0
         #         key[batch + 1:, :, ref:, :] = u @ torch.diag_embed(s) @ v
-                
+                    
                 
                 
         
@@ -349,6 +447,38 @@ class SharedAttentionProcessor(DefaultAttentionProcessor):
                 # print('in svd reference')
                 batch = value.shape[0] // 2
                 ref = value.shape[-2] // 2
+                
+                if self.svd_mass_value:
+                    u, s, v = torch.linalg.svd(value[..., ref:, :], full_matrices=False)
+                    
+                    coefs = s / s.sum(dim=-1, keepdim=True)
+                    cumsum = coefs.cumsum(dim=-1)
+                    
+                    s[cumsum <= self.svd_mass_value_threshhold] = 0
+                    # нахожу индекс первого ненулевого элемента и его cumsum вклада в абсолютную массу
+                    idx = torch.argmax(s, dim=-1, keepdim=True)
+                    print(idx[0, 0])
+                    bound = torch.gather(cumsum, dim=-1, index=idx)
+                    print(bound[0, 0])
+                    
+                    # надо найти prev index, чтобы узнать, как сильно мы обнулили
+                    prev_idx = idx.detach().clone()
+                    prev_idx[prev_idx != 0] -= 1
+                    prev_value = torch.gather(cumsum, dim=-1, index=prev_idx)
+                    
+                    prev_value[idx == prev_idx] = 0
+                    # это то, сколько нам не хватило / вклад конкретно нужного элемента в массу
+                    k = (self.svd_mass_value_threshhold - prev_value) / (bound - prev_value)
+                    # => получили долю абсолютной массы, которую мы хотим обнулить 
+                    # k < 1
+                    
+                    s.scatter_reduce_(-1, idx, 1 - k, reduce='prod')
+                    
+                    value[..., ref:, :] = u @ torch.diag_embed(s) @ v
+                    value[0, :, ref:, :] = value[0, :, :ref, :]
+                    value[batch, :, ref:, :] = value[batch, :, :ref, :]
+                    
+                    
                 
                 if self.svd_variance_value:
                     u, s, v = torch.linalg.svd(value[1:batch, :, ref:, :], full_matrices=False)
@@ -393,12 +523,31 @@ class SharedAttentionProcessor(DefaultAttentionProcessor):
                     u, s, v = torch.linalg.svd(value[batch + 1:, :, ref:, :], full_matrices=False)
                     cumsum = (
                         torch.pow(
-                            (s - s.mean(dim=-1)[..., None]), 2) / 
-                            ((s.shape[-1]-1) * s.var(dim=-1)[..., None])
+                            (s - means), 2) / 
+                            ((s.shape[-1]-1) * s.var(dim=-1, keepdim=True))
                     ).cumsum(dim=-1)
                     
                     if self.svd_variance_value_biggest:
                         s[cumsum <= self.svd_variance_value_threshhold] = 0
+                        
+                        # нахожу индекс первого ненулевого элемента и его cumsum вклада в дисперсию
+                        idx = torch.argmax(s, dim=-1, keepdim=True)
+                        bound = torch.gather(cumsum, dim=-1, index=idx)
+                        
+                        # надо найти prev index, чтобы узнать, как сильно мы обнулили
+                        prev_idx = idx.detach().clone()
+                        prev_idx[prev_idx != 0] -= 1
+                        prev_value = torch.gather(cumsum, dim=-1, index=prev_idx)
+                        
+                        prev_value[idx == prev_idx] = 0
+                        # это то, сколько нам не хватило / вклад конкретно нужного элемента в дисперсии
+                        k = (self.svd_variance_value_threshhold - prev_value) / (bound - prev_value)
+                        # k < 1
+                        
+                        s.scatter_reduce_(-1, idx, -means, reduce='sum')
+                        s.scatter_reduce_(-1, idx, torch.sqrt(k), reduce='prod')
+                        s.scatter_reduce_(-1, idx, means, reduce='sum')
+                        
                     if self.svd_variance_value_smallest:
                         s[cumsum >= self.svd_variance_value_threshhold] = 0
                     
@@ -427,29 +576,68 @@ class SharedAttentionProcessor(DefaultAttentionProcessor):
                 
                 if self.svd_variance_key:
                     u, s, v = torch.linalg.svd(key[1:batch, :, ref:, :], full_matrices=False)
+                    means = s.mean(dim=-1, keepdim=True)
                     cumsum = (
                         torch.pow(
-                            (s - s.mean(dim=-1)[..., None]), 2) / 
-                            ((s.shape[-1]-1) * s.var(dim=-1)[..., None])
+                            (s - means), 2) / 
+                            ((s.shape[-1]-1) * s.var(dim=-1, keepdim=True))
                     ).cumsum(dim=-1)
                     
                     if self.svd_variance_key_biggest:
-                        s[cumsum < self.svd_variance_key_threshhold] = 0
+                        s[cumsum <= self.svd_variance_key_threshhold] = 0
+                        # нахожу индекс первого ненулевого элемента и его cumsum вклада в дисперсию
+                        idx = torch.argmax(s, dim=-1, keepdim=True)
+                        bound = torch.gather(cumsum, dim=-1, index=idx)
+                        
+                        # надо найти prev index, чтобы узнать, как сильно мы обнулили
+                        prev_idx = idx.detach().clone()
+                        prev_idx[prev_idx != 0] -= 1
+                        prev_value = torch.gather(cumsum, dim=-1, index=prev_idx)
+                        
+                        prev_value[idx == prev_idx] = 0
+                        # это то, сколько нам не хватило / вклад конкретно нужного элемента в дисперсии
+                        k = (self.svd_variance_key_threshhold - prev_value) / (bound - prev_value)
+                        # k < 1
+                        
+                        s.scatter_reduce_(-1, idx, -means, reduce='sum')
+                        s.scatter_reduce_(-1, idx, torch.sqrt(k), reduce='prod')
+                        s.scatter_reduce_(-1, idx, means, reduce='sum')
+                        
+                        
                     if self.svd_variance_key_smallest:
-                        s[cumsum > self.svd_variance_key_threshhold] = 0
+                        s[cumsum >= self.svd_variance_key_threshhold] = 0
                     
                     key[1:batch, :, ref:, :] = u @ torch.diag_embed(s) @ v
                     
                     u, s, v = torch.linalg.svd(key[batch + 1:, :, ref:, :], full_matrices=False)
                     
+                    means = s.mean(dim=-1, keepdim=True)
                     cumsum = (
                         torch.pow(
-                            (s - s.mean(dim=-1)[..., None]), 2) / 
-                            ((s.shape[-1]-1) * s.var(dim=-1)[..., None])
+                            (s - means), 2) / 
+                            ((s.shape[-1]-1) * s.var(dim=-1, keepdim=True))
                     ).cumsum(dim=-1)
                     
                     if self.svd_variance_key_biggest:
-                        s[cumsum < self.svd_variance_key_threshhold] = 0
+                        s[cumsum <= self.svd_variance_key_threshhold] = 0
+                        # нахожу индекс первого ненулевого элемента и его cumsum вклада в дисперсию
+                        idx = torch.argmax(s, dim=-1, keepdim=True)
+                        bound = torch.gather(cumsum, dim=-1, index=idx)
+                        
+                        # надо найти prev index, чтобы узнать, как сильно мы обнулили
+                        prev_idx = idx.detach().clone()
+                        prev_idx[prev_idx != 0] -= 1
+                        prev_value = torch.gather(cumsum, dim=-1, index=prev_idx)
+                        
+                        prev_value[idx == prev_idx] = 0
+                        # это то, сколько нам не хватило / вклад конкретно нужного элемента в дисперсии
+                        k = (self.svd_variance_key_threshhold - prev_value) / (bound - prev_value)
+                        # k < 1
+                        
+                        s.scatter_reduce_(-1, idx, -means, reduce='sum')
+                        s.scatter_reduce_(-1, idx, torch.sqrt(k), reduce='prod')
+                        s.scatter_reduce_(-1, idx, means, reduce='sum')
+                        
                     if self.svd_variance_key_smallest:
                         s[cumsum > self.svd_variance_key_threshhold] = 0
                         
@@ -553,10 +741,46 @@ class SharedAttentionProcessor(DefaultAttentionProcessor):
             hidden_states = hidden_states + residual
 
         hidden_states = hidden_states / attn.rescale_output_factor
-        if self.svd and self.svd_flag: 
+        if (self.svd and self.svd_flag and 
+            (self.svd_null_start is not None or 
+             self.svd_remain_one is not None or 
+             self.svd_coef is not None or 
+             self.svd_variance_threshold_smallest is not None)): 
+            # боже какой ужас
+            
             # print('in svd')
             u, s, v = torch.linalg.svd(hidden_states, full_matrices=False)
             # print(hidden_states.shape, s.shape)
+            if self.svd_variance_threshold_smallest is not None:
+                means = s.mean(dim=-1, keepdim=True)
+                cumsum = (
+                    torch.pow(
+                        (s - means), 2) / 
+                        ((s.shape[-1]-1) * s.var(dim=-1, keepdim=True))
+                ).cumsum(dim=-1)
+                
+                cumsum = 1 - cumsum
+                    
+                s[cumsum <= self.svd_variance_threshold_smallest] = 0
+                # нахожу индекс первого нулевого элемента
+                # это как раз граница, откуда мы начали обнулять
+                idx = torch.argmin(s, dim=-1, keepdim=True)
+                bound = torch.gather(cumsum, dim=-1, index=idx)
+                
+                # prev index -- это чиселка, которая не обнуленная еще
+                prev_idx = idx.detach().clone()
+                prev_idx[prev_idx != 0] -= 1
+                prev_value = torch.gather(cumsum, dim=-1, index=prev_idx)
+                
+                prev_value[idx == prev_idx] = 1
+                # это то, сколько нам не хватило / вклад конкретно нужного элемента в дисперсии
+                k = (self.svd_variance_threshold_smallest - bound) / (prev_value - bound)
+                # k < 1
+                
+                s.scatter_reduce_(-1, idx, -means, reduce='sum')
+                s.scatter_reduce_(-1, idx, torch.sqrt(k), reduce='prod')
+                s.scatter_reduce_(-1, idx, means, reduce='sum')
+            
             if self.svd_null_start is not None:
                 self.svd_null_end = self.svd_null_end if self.svd_null_end is not None else s.shape[-1]
                 s[..., self.svd_null_start:self.svd_null_end] = 0
@@ -565,6 +789,7 @@ class SharedAttentionProcessor(DefaultAttentionProcessor):
                 s[..., (self.svd_remain_one + 1):s.shape[-1]] = 0
             if self.svd_coef is not None:
                 s[..., int(s.shape[0] * self.svd_coef):] = 0
+                
             hidden_states = u @ torch.diag_embed(s) @ v
         
         return hidden_states
@@ -656,6 +881,11 @@ class SharedAttentionProcessor(DefaultAttentionProcessor):
         self.query_dropout = style_aligned_args.query_dropout
         self.key_dropout = style_aligned_args.key_dropout
         self.value_dropout = style_aligned_args.value_dropout
+        
+        self.svd_variance_threshold_smallest = style_aligned_args.svd_variance_threshold_smallest
+        
+        self.svd_mass_value = style_aligned_args.svd_mass_value
+        self.svd_mass_value_threshhold = style_aligned_args.svd_mass_value_threshhold
     
         self.to_null = to_null
         

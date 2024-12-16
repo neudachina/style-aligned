@@ -87,7 +87,7 @@ def svd_exp(prompt, style_name, objects, image_name='output', seed=0):
     # генерирую сначала с обычным шерингом, потом с обнулением, в конце без шеринга для сравнения
     
     # base_path = './images/more-reference/5-10-key-biggest'
-    base_path = './images/more-reference/5-10-key-biggest-no-style'
+    base_path = './images/no-sharing-05-smallest-fraction'
     Path(base_path).mkdir(parents=True, exist_ok=True)
      
     scheduler = DDIMScheduler(
@@ -99,39 +99,37 @@ def svd_exp(prompt, style_name, objects, image_name='output', seed=0):
         scheduler=scheduler
     ).to("cuda:3")
     
+    images = []
+    
+    images.append(
+        get_concat_v(
+            generate(pipeline, prompt, seed=seed)
+        ).resize((512, 512 * len(prompt)))
+    )
+    
     
     handler = sa_handler.Handler(pipeline)
     sa_args = sa_handler.StyleAlignedArgs(
         share_group_norm=False,
         share_layer_norm=False,
         share_attention=True,
+        enable_attention_sharing=False,
         adain_queries=False,
         adain_keys=False,
         adain_values=False
     )
     
-    images = []
-    # сначала обычный шеринг
-    images.append(
-            get_concat_v(
-                generate(pipeline, prompt, handler=handler, args=sa_args, seed=seed)
-            ).resize((512, 512 * len(prompt))))
-    
     sa_args.svd = True
-    sa_args.svd_reference_key = True
-    sa_args.svd_reference_key_positive = True
-    sa_args.svd_reference_key_negative = True
-    sa_args.start_svd = 5
-    sa_args.end_svd = 10
-    # sa_args.svd_reference_key_start = 0
+    sa_args.start_svd = 0
+    sa_args.end_svd = 5
     
     # хочу по горизонтали менять количество обнулённых сингулярных значений,
     # а по вертикали просто разные промпты
     # xs = range(1, 10)
-    xs = np.linspace(0.1, 1, 10, endpoint=True)
+    xs = np.linspace(0.1, 0.6, 11, endpoint=True)
         
     for i in xs:
-        sa_args.svd_variance_value_threshhold = i
+        sa_args.svd_variance_threshold_smallest = i
         # sa_args.svd_reference_key_end = i
         
         images.append(
@@ -141,18 +139,21 @@ def svd_exp(prompt, style_name, objects, image_name='output', seed=0):
         
         images = [get_concat_h(images)]
         images[0].save(os.path.join(base_path, image_name + '.png'))
-        
-    # теперь без шеринга
-    images.append(
-            get_concat_v(
-                generate(pipeline, prompt, seed=seed)
-            ).resize((512, 512 * len(prompt))))
-    images = get_concat_h(images)
-    images.save(os.path.join(base_path, image_name + '.png'))
+    
+    images = images[0]    
+    
+    # # теперь без шеринга
+    # images.append(
+    #         get_concat_v(
+    #             generate(pipeline, prompt, seed=seed)
+    #         ).resize((512, 512 * len(prompt))))
+    # images = get_concat_h(images)
+    # images.save(os.path.join(base_path, image_name + '.png'))
     
     # xlabels = [*map(str, xs)]
     # for i in range(len(xlabels)):
     #     xlabels[i] = '[0-' + xlabels[i] + ')'
+    
     xlabels = [*map(str, np.round(xs, 2))]
     for i in range(len(xlabels)):
         xlabels[i] = '[0-' + xlabels[i] + ']'
@@ -162,145 +163,77 @@ def svd_exp(prompt, style_name, objects, image_name='output', seed=0):
 
 
 
-# prompts = [
-#     "a cat in geometric abstract art",
-#     "a lion in geometric abstract art",
-#     "an elephant in geometric abstract art",
-#     "a bird in geometric abstract art",
-#     "a fish in geometric abstract art"
-# ]
-# objects = ["cat", "lion", "elephant", "bird", "fish"]
-# style = "a [...] in geometric abstract art"
-# svd_exp(prompts, style, objects, 'geometric')
-
-
 prompts = [
     "a cat in geometric abstract art",
-    "a lion",
-    "an elephant",
-    "a bird",
-    "a fish"
+    "a lion in geometric abstract art",
+    "an elephant in geometric abstract art",
+    "a bird in geometric abstract art",
+    "a fish in geometric abstract art"
 ]
 objects = ["cat", "lion", "elephant", "bird", "fish"]
 style = "a [...] in geometric abstract art"
 svd_exp(prompts, style, objects, 'geometric')
 
 
-
-
-# prompts = [
-#     "a sci-fi robot warrior. comic book illustration. cyberpunk theme",
-#     "a sci-fi spaceship. comic book illustration. cyberpunk theme",
-#     "a sci-fi cityscape. comic book illustration. cyberpunk theme",
-#     "a sci-fi alien creature. comic book illustration. cyberpunk theme",
-#     "a sci-fi futuristic car. comic book illustration. cyberpunk theme"
-# ]
-# style = "a sci-fi [...]. comic book illustration. cyberpunk theme"
-# objects = ["robot warrior", "spaceship", "cityscape", "alien creature", "futuristic car"]
-# svd_exp(prompts, style, objects, 'sci_fi')
-
-
 prompts = [
     "a sci-fi robot warrior. comic book illustration. cyberpunk theme",
-    "a sci-fi spaceship",
-    "a sci-fi cityscape",
-    "a sci-fi alien creature",
-    "a sci-fi futuristic car"
+    "a sci-fi spaceship. comic book illustration. cyberpunk theme",
+    "a sci-fi cityscape. comic book illustration. cyberpunk theme",
+    "a sci-fi alien creature. comic book illustration. cyberpunk theme",
+    "a sci-fi futuristic car. comic book illustration. cyberpunk theme"
 ]
 style = "a sci-fi [...]. comic book illustration. cyberpunk theme"
 objects = ["robot warrior", "spaceship", "cityscape", "alien creature", "futuristic car"]
 svd_exp(prompts, style, objects, 'sci_fi')
 
 
-# prompts = [
-#     "a firewoman in minimal flat design illustration",
-#     "a farmer in minimal flat design illustration",
-#     "a unicorn in minimal flat design illustration",
-#     "a dino in minimal flat design illustration",
-#     "a dog in minimal flat design illustration"
-# ]
-# style = "a [...] in minimal flat design illustration"
-# objects = ["firewoman", "farmer", "unicorn", "dino", "dog"]
-# svd_exp(prompts, style, objects, 'flat')
-
 
 prompts = [
     "a firewoman in minimal flat design illustration",
-    "a farmer",
-    "a unicorn",
-    "a dino",
-    "a dog"
+    "a farmer in minimal flat design illustration",
+    "a unicorn in minimal flat design illustration",
+    "a dino in minimal flat design illustration",
+    "a dog in minimal flat design illustration"
 ]
 style = "a [...] in minimal flat design illustration"
 objects = ["firewoman", "farmer", "unicorn", "dino", "dog"]
 svd_exp(prompts, style, objects, 'flat')
 
 
-# prompts = [
-#     "a beach umbrella in summer pop art",
-#     "a surfboard in summer pop art",
-#     "a beach ball in summer pop art",
-#     "a sandcastle in summer pop art",
-#     "a sun lounger in summer pop art"
-# ]
-# objects = ["beach umbrella", "surfboard", "beach ball", "sandcastle", "sun lounger"]
-# style = "a [...] in summer pop art"
-# svd_exp(prompts, style, objects, 'pop_art')
 
 prompts = [
     "a beach umbrella in summer pop art",
-    "a surfboard",
-    "a beach ball",
-    "a sandcastle",
-    "a sun lounger"
+    "a surfboard in summer pop art",
+    "a beach ball in summer pop art",
+    "a sandcastle in summer pop art",
+    "a sun lounger in summer pop art"
 ]
 objects = ["beach umbrella", "surfboard", "beach ball", "sandcastle", "sun lounger"]
 style = "a [...] in summer pop art"
 svd_exp(prompts, style, objects, 'pop_art')
 
 
-# prompts = [
-#     "a peacock in psychedelic illustration",
-#     "a hummingbird in psychedelic illustration",
-#     "a butterfly in psychedelic illustration",
-#     "a chameleon in psychedelic illustration",
-#     "a parrot in psychedelic illustration"
-# ]
-# objects = ["peacock", "hummingbird", "butterfly", "chameleon", "parrot"]
-# style = "a [...] in psychedelic illustration"
-# svd_exp(prompts, style, objects, 'psychedelic')
 
 prompts = [
     "a peacock in psychedelic illustration",
-    "a hummingbird",
-    "a butterfly",
-    "a chameleon",
-    "a parrot"
+    "a hummingbird in psychedelic illustration",
+    "a butterfly in psychedelic illustration",
+    "a chameleon in psychedelic illustration",
+    "a parrot in psychedelic illustration"
 ]
 objects = ["peacock", "hummingbird", "butterfly", "chameleon", "parrot"]
 style = "a [...] in psychedelic illustration"
 svd_exp(prompts, style, objects, 'psychedelic')
 
 
-# prompts = [
-#     "a spaceship in 80s retro wave",
-#     "a robot in 80s retro wave",
-#     "a laser gun in 80s retro wave",
-#     "a flying saucer in 80s retro wave",
-#     "a time machine in 80s retro wave"
-# ]
-# objects = ["spaceship", "robot", "laser gun", "flying saucer", "time machine"]
-# style = "a [...] in 80s retro wave"
-# svd_exp(prompts, style, objects, 'retro_wave')
 
 prompts = [
     "a spaceship in 80s retro wave",
-    "a robot",
-    "a laser gun",
-    "a flying saucer",
-    "a time machine"
+    "a robot in 80s retro wave",
+    "a laser gun in 80s retro wave",
+    "a flying saucer in 80s retro wave",
+    "a time machine in 80s retro wave"
 ]
 objects = ["spaceship", "robot", "laser gun", "flying saucer", "time machine"]
 style = "a [...] in 80s retro wave"
 svd_exp(prompts, style, objects, 'retro_wave')
-

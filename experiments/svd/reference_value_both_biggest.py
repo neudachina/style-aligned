@@ -180,48 +180,191 @@ def svd_exp(prompt, style_name, objects, image_name='output', seed=0):
 # svd_exp(prompts, style, objects, 'sci_fi')
 
 
+# prompts = [
+#     "a firewoman in minimal flat design illustration",
+#     "a farmer in minimal flat design illustration",
+#     "a unicorn in minimal flat design illustration",
+#     "a dino in minimal flat design illustration",
+#     "a dog in minimal flat design illustration"
+# ]
+# style = "a [...] in minimal flat design illustration"
+# objects = ["firewoman", "farmer", "unicorn", "dino", "dog"]
+# svd_exp(prompts, style, objects, 'flat')
+
+
+# prompts = [
+#     "a beach umbrella in summer pop art",
+#     "a surfboard in summer pop art",
+#     "a beach ball in summer pop art",
+#     "a sandcastle in summer pop art",
+#     "a sun lounger in summer pop art"
+# ]
+# objects = ["beach umbrella", "surfboard", "beach ball", "sandcastle", "sun lounger"]
+# style = "a [...] in summer pop art"
+# svd_exp(prompts, style, objects, 'pop_art')
+
+
+# prompts = [
+#     "a peacock in psychedelic illustration",
+#     "a hummingbird in psychedelic illustration",
+#     "a butterfly in psychedelic illustration",
+#     "a chameleon in psychedelic illustration",
+#     "a parrot in psychedelic illustration"
+# ]
+# objects = ["peacock", "hummingbird", "butterfly", "chameleon", "parrot"]
+# style = "a [...] in psychedelic illustration"
+# svd_exp(prompts, style, objects, 'psychedelic')
+
+
+# prompts = [
+#     "a spaceship in 80s retro wave",
+#     "a robot in 80s retro wave",
+#     "a laser gun in 80s retro wave",
+#     "a flying saucer in 80s retro wave",
+#     "a time machine in 80s retro wave"
+# ]
+# objects = ["spaceship", "robot", "laser gun", "flying saucer", "time machine"]
+# style = "a [...] in 80s retro wave"
+# svd_exp(prompts, style, objects, 'retro_wave')
+
+
+# prompts = [
+#     "a cat in geometric abstract art",
+#     "a lion in geometric abstract art",
+#     "an elephant in geometric abstract art",
+#     "a bird in geometric abstract art",
+#     "a fish in geometric abstract art"
+# ]
+# objects = ["cat", "lion", "elephant", "bird", "fish"]
+# style = "a [...] in geometric abstract art"
+# svd_exp(prompts, style, objects, 'geometric')
+
+
+prompts = [
+    "a cat in geometric abstract art",
+    "a lion",
+    "an elephant",
+    "a bird",
+    "a fish"
+]
+objects = ["cat", "lion", "elephant", "bird", "fish"]
+style = "a [...] in geometric abstract art"
+svd_exp(prompts, style, objects, 'geometric')
+
+
+
+
+# prompts = [
+#     "a sci-fi robot warrior. comic book illustration. cyberpunk theme",
+#     "a sci-fi spaceship. comic book illustration. cyberpunk theme",
+#     "a sci-fi cityscape. comic book illustration. cyberpunk theme",
+#     "a sci-fi alien creature. comic book illustration. cyberpunk theme",
+#     "a sci-fi futuristic car. comic book illustration. cyberpunk theme"
+# ]
+# style = "a sci-fi [...]. comic book illustration. cyberpunk theme"
+# objects = ["robot warrior", "spaceship", "cityscape", "alien creature", "futuristic car"]
+# svd_exp(prompts, style, objects, 'sci_fi')
+
+
+prompts = [
+    "a sci-fi robot warrior. comic book illustration. cyberpunk theme",
+    "a sci-fi spaceship",
+    "a sci-fi cityscape",
+    "a sci-fi alien creature",
+    "a sci-fi futuristic car"
+]
+style = "a sci-fi [...]. comic book illustration. cyberpunk theme"
+objects = ["robot warrior", "spaceship", "cityscape", "alien creature", "futuristic car"]
+svd_exp(prompts, style, objects, 'sci_fi')
+
+
+# prompts = [
+#     "a firewoman in minimal flat design illustration",
+#     "a farmer in minimal flat design illustration",
+#     "a unicorn in minimal flat design illustration",
+#     "a dino in minimal flat design illustration",
+#     "a dog in minimal flat design illustration"
+# ]
+# style = "a [...] in minimal flat design illustration"
+# objects = ["firewoman", "farmer", "unicorn", "dino", "dog"]
+# svd_exp(prompts, style, objects, 'flat')
+
+
 prompts = [
     "a firewoman in minimal flat design illustration",
-    "a farmer in minimal flat design illustration",
-    "a unicorn in minimal flat design illustration",
-    "a dino in minimal flat design illustration",
-    "a dog in minimal flat design illustration"
+    "a farmer",
+    "a unicorn",
+    "a dino",
+    "a dog"
 ]
 style = "a [...] in minimal flat design illustration"
 objects = ["firewoman", "farmer", "unicorn", "dino", "dog"]
 svd_exp(prompts, style, objects, 'flat')
 
 
+# prompts = [
+#     "a beach umbrella in summer pop art",
+#     "a surfboard in summer pop art",
+#     "a beach ball in summer pop art",
+#     "a sandcastle in summer pop art",
+#     "a sun lounger in summer pop art"
+# ]
+# objects = ["beach umbrella", "surfboard", "beach ball", "sandcastle", "sun lounger"]
+# style = "a [...] in summer pop art"
+# svd_exp(prompts, style, objects, 'pop_art')
+
 prompts = [
     "a beach umbrella in summer pop art",
-    "a surfboard in summer pop art",
-    "a beach ball in summer pop art",
-    "a sandcastle in summer pop art",
-    "a sun lounger in summer pop art"
+    "a surfboard",
+    "a beach ball",
+    "a sandcastle",
+    "a sun lounger"
 ]
 objects = ["beach umbrella", "surfboard", "beach ball", "sandcastle", "sun lounger"]
 style = "a [...] in summer pop art"
 svd_exp(prompts, style, objects, 'pop_art')
 
 
+# prompts = [
+#     "a peacock in psychedelic illustration",
+#     "a hummingbird in psychedelic illustration",
+#     "a butterfly in psychedelic illustration",
+#     "a chameleon in psychedelic illustration",
+#     "a parrot in psychedelic illustration"
+# ]
+# objects = ["peacock", "hummingbird", "butterfly", "chameleon", "parrot"]
+# style = "a [...] in psychedelic illustration"
+# svd_exp(prompts, style, objects, 'psychedelic')
+
 prompts = [
     "a peacock in psychedelic illustration",
-    "a hummingbird in psychedelic illustration",
-    "a butterfly in psychedelic illustration",
-    "a chameleon in psychedelic illustration",
-    "a parrot in psychedelic illustration"
+    "a hummingbird",
+    "a butterfly",
+    "a chameleon",
+    "a parrot"
 ]
 objects = ["peacock", "hummingbird", "butterfly", "chameleon", "parrot"]
 style = "a [...] in psychedelic illustration"
 svd_exp(prompts, style, objects, 'psychedelic')
 
 
+# prompts = [
+#     "a spaceship in 80s retro wave",
+#     "a robot in 80s retro wave",
+#     "a laser gun in 80s retro wave",
+#     "a flying saucer in 80s retro wave",
+#     "a time machine in 80s retro wave"
+# ]
+# objects = ["spaceship", "robot", "laser gun", "flying saucer", "time machine"]
+# style = "a [...] in 80s retro wave"
+# svd_exp(prompts, style, objects, 'retro_wave')
+
 prompts = [
     "a spaceship in 80s retro wave",
-    "a robot in 80s retro wave",
-    "a laser gun in 80s retro wave",
-    "a flying saucer in 80s retro wave",
-    "a time machine in 80s retro wave"
+    "a robot",
+    "a laser gun",
+    "a flying saucer",
+    "a time machine"
 ]
 objects = ["spaceship", "robot", "laser gun", "flying saucer", "time machine"]
 style = "a [...] in 80s retro wave"

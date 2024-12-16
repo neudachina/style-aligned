@@ -45,7 +45,7 @@ def fix_seed(seed=0):
     
 def label(image, xlabels, ylabels, base_path, image_name, title=None):
     plt.rcParams["figure.figsize"] = (len(xlabels) * 7.5, len(ylabels) * 7.5)
-    plt.rcParams["font.size"] = 30
+    plt.rcParams["font.size"] = 33
 
     fig, axes = plt.subplots()
 
@@ -79,21 +79,10 @@ def generate(pipeline, prompts, handler=None, args=None, seed=0, num_steps=20):
     if args and handler:
         handler.remove()
     return images
-
-
-
-def svd_exp(prompt, style_name, objects, image_name='output', seed=0):
-    # хочу попробовать уменьшать значения разных ПОСЛЕДНИХ собственных чисел 
-    # на первых шагах генерации у РЕФЕРЕНСНОЙ картинки при attention sharing'е 
     
-    # по горизонтали -- количество компонент, 
-    # по вертикали -- коэффициент
     
-    # картинки с 0-5 отдельно, с 5-10 отдельно
-    
-    base_path = './images/no-sharing-replace-mean-025/'
-    Path(base_path).mkdir(parents=True, exist_ok=True)
-     
+
+def svd_exp(prompt, style_name, objects, image_name='output', seed=0):     
     scheduler = DDIMScheduler(
         beta_start=0.00085, beta_end=0.012, beta_schedule="scaled_linear", 
         clip_sample=False, set_alpha_to_one=False)
@@ -101,57 +90,104 @@ def svd_exp(prompt, style_name, objects, image_name='output', seed=0):
     pipeline = StableDiffusionXLPipeline.from_pretrained(
         "stabilityai/stable-diffusion-xl-base-1.0", 
         scheduler=scheduler
-    ).to("cuda:2")
+    ).to("cuda:0")
     
-    images = []
-    
-    # сначала генерирую просто без модификаций
-    images.append(get_concat_h(generate(pipeline, prompt, seed=seed)))
-    
+    # то есть я сначала хочу сгенерировать две картинки: 
+    # референс и таргет просто при обычном sharing'е
     handler = sa_handler.Handler(pipeline)
     sa_args = sa_handler.StyleAlignedArgs(
         share_group_norm=False,
         share_layer_norm=False,
         share_attention=True,
-        enable_attention_sharing=False,
         adain_queries=False,
         adain_keys=False,
         adain_values=False,
     )
     
-    sa_args.query_dropout = True
-    images.append(get_concat_h(generate(pipeline, prompt, handler=handler, args=sa_args, seed=seed)))
+
+    # а потом уже все менять и сохранять картинку только таргета, 
+    # потому что референс не должен меняться
+    base_path = './images/reference/variance/value-understanding/'
     
-    sa_args.query_dropout = False
-    sa_args.key_dropout = True
-    images.append(get_concat_h(generate(pipeline, prompt, handler=handler, args=sa_args, seed=seed)))
-    
-    sa_args.key_dropout = False
-    sa_args.value_dropout = True
-    images.append(get_concat_h(generate(pipeline, prompt, handler=handler, args=sa_args, seed=seed)))
-    
-    images = get_concat_v(images)
-    images.save(os.path.join(base_path, image_name + '.png'))
+    def work(xs, name):
+        images = []
+        path = os.path.join(base_path, name)
+        Path(path).mkdir(parents=True, exist_ok=True)
+        
+        # обычный шеринг
+        images.append(
+            get_concat_v(
+                generate(pipeline, prompt, handler=handler, 
+                        args=sa_args, seed=seed))
+        )
+        
+        # крутой шеринг
+        sa_args.svd = True
+        sa_args.svd_reference_value = True
+        sa_args.svd_variance_value = True
+        sa_args.svd_variance_value_biggest = True
+        sa_args.svd_variance_value_smallest = False
+        
+        # sa_args.start_svd = 0
+        # sa_args.end_svd = 5
+        
+        for j in xs:
+            sa_args.svd_variance_value_threshhold = j
             
+            images.append(
+                get_concat_v(
+                    generate(pipeline, prompt, handler=handler, 
+                            args=sa_args, seed=seed))
+            )
         
-    xlabels = objects
-    ylabels = ['base', 'query', 'key', 'value']
+            images = [get_concat_h(images)]
+            images[0].save(os.path.join(path, image_name + '.png'))
+            
+        # вообще без шеринга
+        images.append(
+            get_concat_v(
+                generate(pipeline, prompt, seed=seed))
+        )
         
-    label(images, xlabels, ylabels, base_path, image_name, title=style_name)
+        images = get_concat_h(images)
+        images.save(os.path.join(path, image_name + '.png'))
+    
+        xlabels = [*map(str, np.round(xs, 2))]
+        for i in range(len(xlabels)):
+            xlabels[i] = '[0, ' + xlabels[i] + ']' 
+        xlabels = ['base sharing'] + xlabels + ['no sharing']
+            
+        label(images, xlabels, objects, path, image_name, title=style_name)
+    
+    
+    work(np.linspace(0.3, 0.7, 11), 'full--03-07-11')
     
     
     
 
-prompts = [
-    "a cat in geometric abstract art",
-    "a lion in geometric abstract art",
-    "an elephant in geometric abstract art",
-    "a bird in geometric abstract art",
-    "a fish in geometric abstract art"
-]
-objects = ["cat", "lion", "elephant", "bird", "fish"]
-style = "a [...] in geometric abstract art"
-svd_exp(prompts, style, objects, 'geometric')
+# prompts = [
+#     "a cat in geometric abstract art",
+#     "a lion in geometric abstract art",
+#     "an elephant in geometric abstract art",
+#     "a bird in geometric abstract art",
+#     "a fish in geometric abstract art"
+# ]
+# objects = ["cat", "lion", "elephant", "bird", "fish"]
+# style = "a [...] in geometric abstract art"
+# svd_exp(prompts, style, objects, 'geometric')
+
+
+# prompts = [
+#     "a cat in geometric abstract art",
+#     "a lion",
+#     "an elephant",
+#     "a bird",
+#     "a fish"
+# ]
+# objects = ["cat", "lion", "elephant", "bird", "fish"]
+# style = "a [...] in geometric abstract art"
+# svd_exp(prompts, style, objects, 'geometric')
+
 
 
 
@@ -167,6 +203,18 @@ objects = ["robot warrior", "spaceship", "cityscape", "alien creature", "futuris
 svd_exp(prompts, style, objects, 'sci_fi')
 
 
+# prompts = [
+#     "a sci-fi robot warrior. comic book illustration. cyberpunk theme",
+#     "a sci-fi spaceship",
+#     "a sci-fi cityscape",
+#     "a sci-fi alien creature",
+#     "a sci-fi futuristic car"
+# ]
+# style = "a sci-fi [...]. comic book illustration. cyberpunk theme"
+# objects = ["robot warrior", "spaceship", "cityscape", "alien creature", "futuristic car"]
+# svd_exp(prompts, style, objects, 'sci_fi')
+
+
 prompts = [
     "a firewoman in minimal flat design illustration",
     "a farmer in minimal flat design illustration",
@@ -177,6 +225,18 @@ prompts = [
 style = "a [...] in minimal flat design illustration"
 objects = ["firewoman", "farmer", "unicorn", "dino", "dog"]
 svd_exp(prompts, style, objects, 'flat')
+
+
+# prompts = [
+#     "a firewoman in minimal flat design illustration",
+#     "a farmer",
+#     "a unicorn",
+#     "a dino",
+#     "a dog"
+# ]
+# style = "a [...] in minimal flat design illustration"
+# objects = ["firewoman", "farmer", "unicorn", "dino", "dog"]
+# svd_exp(prompts, style, objects, 'flat')
 
 
 prompts = [
@@ -190,6 +250,17 @@ objects = ["beach umbrella", "surfboard", "beach ball", "sandcastle", "sun loung
 style = "a [...] in summer pop art"
 svd_exp(prompts, style, objects, 'pop_art')
 
+# prompts = [
+#     "a beach umbrella in summer pop art",
+#     "a surfboard",
+#     "a beach ball",
+#     "a sandcastle",
+#     "a sun lounger"
+# ]
+# objects = ["beach umbrella", "surfboard", "beach ball", "sandcastle", "sun lounger"]
+# style = "a [...] in summer pop art"
+# svd_exp(prompts, style, objects, 'pop_art')
+
 
 prompts = [
     "a peacock in psychedelic illustration",
@@ -202,6 +273,17 @@ objects = ["peacock", "hummingbird", "butterfly", "chameleon", "parrot"]
 style = "a [...] in psychedelic illustration"
 svd_exp(prompts, style, objects, 'psychedelic')
 
+# prompts = [
+#     "a peacock in psychedelic illustration",
+#     "a hummingbird",
+#     "a butterfly",
+#     "a chameleon",
+#     "a parrot"
+# ]
+# objects = ["peacock", "hummingbird", "butterfly", "chameleon", "parrot"]
+# style = "a [...] in psychedelic illustration"
+# svd_exp(prompts, style, objects, 'psychedelic')
+
 
 prompts = [
     "a spaceship in 80s retro wave",
@@ -213,3 +295,14 @@ prompts = [
 objects = ["spaceship", "robot", "laser gun", "flying saucer", "time machine"]
 style = "a [...] in 80s retro wave"
 svd_exp(prompts, style, objects, 'retro_wave')
+
+# prompts = [
+#     "a spaceship in 80s retro wave",
+#     "a robot",
+#     "a laser gun",
+#     "a flying saucer",
+#     "a time machine"
+# ]
+# objects = ["spaceship", "robot", "laser gun", "flying saucer", "time machine"]
+# style = "a [...] in 80s retro wave"
+# svd_exp(prompts, style, objects, 'retro_wave')
